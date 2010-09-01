@@ -66,11 +66,10 @@ public class SSHConnection
     }
 
     public SSHConnection withUserInfo( final UserInfo userInfo )
-        throws SSHWrapException
     {
         if ( isConnected() )
         {
-            throw new SSHWrapException( "Cannot set user-info on connected session!" );
+            throw new IllegalStateException( "Cannot set user-info on connected session!" );
         }
 
         this.userInfo = userInfo;
