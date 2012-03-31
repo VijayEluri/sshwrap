@@ -28,7 +28,7 @@
   <groupId>org.commonjava.sshwrap</groupId>
   <artifactId>sshwrap</artifactId>
   <packaging>jar</packaging>
-  <version>0.2-SNAPSHOT</version>
+  <version>0.2</version>
 
   <name>sshwrap - Jsch Wrapper</name>
   <description>Convenience API to make Jsch easier to use</description>
