@@ -16,10 +16,7 @@
  * <http://www.gnu.org/licenses>.
  */
 
-package org.commonjava.sshwrap;
-
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.lang.StringUtils;
+package org.commonjava.sshwrap.config;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -32,6 +29,7 @@ import java.io.InputStreamReader;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -40,22 +38,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.lang.StringUtils;
+
 /**
- * Forked from git://egit.eclipse.org/jgit.git@94207f0a43a44261b8170d3cdba3028059775d9d
- * 
- * Simple configuration parser for the OpenSSH ~/.ssh/config file.
+ * Forked from git://egit.eclipse.org/jgit.git@94207f0a43a44261b8170d3cdba3028059775d9d Simple configuration parser for
+ * the OpenSSH ~/.ssh/config file.
  * <p>
- * Since JSch does not (currently) have the ability to parse an OpenSSH
- * configuration file this is a simple parser to read that file and make the
- * critical options available to {@link SshSessionFactory}.
+ * Since JSch does not (currently) have the ability to parse an OpenSSH configuration file this is a simple parser to
+ * read that file and make the critical options available to {@link SshSessionFactory}.
  */
 public class DefaultSSHConfiguration
     implements SSHConfiguration
 {
     /** IANA assigned port number for SSH. */
     static final int SSH_PORT = 22;
-
-    private final File sshDir;
 
     private final Set<File> privateKeys;
 
@@ -71,10 +68,9 @@ public class DefaultSSHConfiguration
     /**
      * Obtain the user's configuration data.
      * <p>
-     * The configuration file is always returned to the caller, even if no file
-     * exists in the user's home directory at the time the call was made. Lookup
-     * requests are cached and are automatically updated if the user modifies
-     * the configuration file since the last time it was cached.
+     * The configuration file is always returned to the caller, even if no file exists in the user's home directory at
+     * the time the call was made. Lookup requests are cached and are automatically updated if the user modifies the
+     * configuration file since the last time it was cached.
      * </p>
      * <p>
      * Uses ${user.home}/.ssh/config as the configuration file.
@@ -88,29 +84,48 @@ public class DefaultSSHConfiguration
     /**
      * Obtain the user's configuration data.
      * <p>
-     * The configuration file is always returned to the caller, even if no file
-     * exists in the user's home directory at the time the call was made. Lookup
-     * requests are cached and are automatically updated if the user modifies
-     * the configuration file since the last time it was cached.
+     * The configuration file is always returned to the caller, even if no file exists in the user's home directory at
+     * the time the call was made. Lookup requests are cached and are automatically updated if the user modifies the
+     * configuration file since the last time it was cached.
      * </p>
      * 
      * @param sshDir The base directory where all SSH configurations are housed.
      */
     public DefaultSSHConfiguration( final File sshDir )
     {
-        this.sshDir = sshDir;
         configFile = new File( sshDir, "config" );
         knownHosts = new File( sshDir, "known_hosts" );
 
         hosts = parseHosts();
-        privateKeys = initPrivateKeys();
+        privateKeys = initPrivateKeys( sshDir );
     }
 
+    /**
+     * Obtain the user's configuration data.
+     * <p>
+     * The configuration file is always returned to the caller, even if no file exists in the user's home directory at
+     * the time the call was made. Lookup requests are cached and are automatically updated if the user modifies the
+     * configuration file since the last time it was cached.
+     * </p>
+     * 
+     * @param sshDir The base directory where all SSH configurations are housed.
+     */
+    public DefaultSSHConfiguration( final File config, final File knownHosts, final File... identities )
+    {
+        this.configFile = config;
+        this.knownHosts = knownHosts;
+        this.privateKeys = new HashSet<File>( Arrays.asList( identities ) );
+
+        hosts = parseHosts();
+    }
+
+    @Override
     public Set<File> getIdentities()
     {
         return privateKeys;
     }
 
+    @Override
     public synchronized InputStream getKnownHosts()
         throws IOException
     {
@@ -143,7 +158,8 @@ public class DefaultSSHConfiguration
 
     /**
      * {@inheritDoc}
-     * @see org.commonjava.sshwrap.SSHConfiguration#lookup(java.lang.String)
+     * 
+     * @see org.commonjava.sshwrap.config.SSHConfiguration#lookup(java.lang.String)
      */
     @Override
     public Host lookup( final String hostName )
@@ -156,27 +172,27 @@ public class DefaultSSHConfiguration
             h = new Host();
         }
 
-        if ( h.patternsApplied )
+        if ( h.isPatternsApplied() )
         {
             return h;
         }
 
-        if ( h.hostName == null )
+        if ( h.getHostName() == null )
         {
-            h.hostName = hostName;
+            h.setHostName( hostName );
         }
 
-        if ( h.user == null )
+        if ( h.getUser() == null )
         {
-            h.user = userName();
+            h.setUser( userName() );
         }
 
-        if ( h.port == 0 )
+        if ( h.getPort() < 1 )
         {
-            h.port = SSH_PORT;
+            h.setPort( SSH_PORT );
         }
 
-        h.patternsApplied = true;
+        h.setPatternsApplied( true );
 
         if ( isNew )
         {
@@ -258,9 +274,9 @@ public class DefaultSSHConfiguration
             {
                 for ( final Host c : current )
                 {
-                    if ( c.hostName == null )
+                    if ( c.getHostName() == null )
                     {
-                        c.hostName = dequote( argValue );
+                        c.setHostName( dequote( argValue ) );
                     }
                 }
             }
@@ -268,9 +284,9 @@ public class DefaultSSHConfiguration
             {
                 for ( final Host c : current )
                 {
-                    if ( c.user == null )
+                    if ( c.getUser() == null )
                     {
-                        c.user = dequote( argValue );
+                        c.setUser( dequote( argValue ) );
                     }
                 }
             }
@@ -281,9 +297,9 @@ public class DefaultSSHConfiguration
                     final int port = Integer.parseInt( dequote( argValue ) );
                     for ( final Host c : current )
                     {
-                        if ( c.port == 0 )
+                        if ( c.getPort() < 1 )
                         {
-                            c.port = port;
+                            c.setPort( port );
                         }
                     }
                 }
@@ -296,9 +312,9 @@ public class DefaultSSHConfiguration
             {
                 for ( final Host c : current )
                 {
-                    if ( c.identityFile == null )
+                    if ( c.getIdentityFile() == null )
                     {
-                        c.identityFile = toFile( dequote( argValue ) );
+                        c.setIdentityFile( toFile( dequote( argValue ) ) );
                     }
                 }
             }
@@ -306,9 +322,9 @@ public class DefaultSSHConfiguration
             {
                 for ( final Host c : current )
                 {
-                    if ( c.preferredAuthentications == null )
+                    if ( c.getPreferredAuthentications() == null )
                     {
-                        c.preferredAuthentications = nows( dequote( argValue ) );
+                        c.setPreferredAuthentications( nows( dequote( argValue ) ) );
                     }
                 }
             }
@@ -316,9 +332,9 @@ public class DefaultSSHConfiguration
             {
                 for ( final Host c : current )
                 {
-                    if ( c.batchMode == null )
+                    if ( c.getBatchMode() == null )
                     {
-                        c.batchMode = yesno( dequote( argValue ) );
+                        c.setBatchMode( yesno( dequote( argValue ) ) );
                     }
                 }
             }
@@ -327,9 +343,57 @@ public class DefaultSSHConfiguration
                 final String value = dequote( argValue );
                 for ( final Host c : current )
                 {
-                    if ( c.strictHostKeyChecking == null )
+                    if ( c.getStrictHostKeyChecking() == null )
                     {
-                        c.strictHostKeyChecking = value;
+                        c.setStrictHostKeyChecking( value );
+                    }
+                }
+            }
+            else if ( StringUtils.equalsIgnoreCase( "LocalForward", keyword ) )
+            {
+                final String[] argParts = argValue.split( ":" );
+                LocalForward lf = null;
+                if ( argParts.length > 3 )
+                {
+                    lf =
+                        new LocalForward( argParts[0], Integer.parseInt( argParts[1] ), argParts[2],
+                                          Integer.parseInt( argParts[3] ) );
+                }
+                else if ( argParts.length > 2 )
+                {
+                    lf =
+                        new LocalForward( Integer.parseInt( argParts[0] ), argParts[1], Integer.parseInt( argParts[2] ) );
+                }
+
+                if ( lf != null )
+                {
+                    for ( final Host host : current )
+                    {
+                        host.addLocalForward( lf );
+                    }
+                }
+            }
+            else if ( StringUtils.equalsIgnoreCase( "RemoteForward", keyword ) )
+            {
+                final String[] argParts = argValue.split( ":" );
+                RemoteForward rf = null;
+                if ( argParts.length > 3 )
+                {
+                    rf =
+                        new RemoteForward( argParts[0], Integer.parseInt( argParts[1] ), argParts[2],
+                                           Integer.parseInt( argParts[3] ) );
+                }
+                else if ( argParts.length > 2 )
+                {
+                    rf =
+                        new RemoteForward( Integer.parseInt( argParts[0] ), argParts[1], Integer.parseInt( argParts[2] ) );
+                }
+
+                if ( rf != null )
+                {
+                    for ( final Host host : current )
+                    {
+                        host.addRemoteForward( rf );
                     }
                 }
             }
@@ -383,13 +447,20 @@ public class DefaultSSHConfiguration
         return new File( userHome(), path );
     }
 
-    private Set<File> initPrivateKeys()
+    private Set<File> initPrivateKeys( final File sshDir )
     {
         final Set<File> privateKeys = new HashSet<File>();
         privateKeys.add( new File( sshDir, "identity" ) );
         privateKeys.add( new File( sshDir, "id_rsa" ) );
         privateKeys.add( new File( sshDir, "id_dsa" ) );
 
+        validatePrivateKeys();
+
+        return privateKeys;
+    }
+
+    private void validatePrivateKeys()
+    {
         for ( final Iterator<File> it = privateKeys.iterator(); it.hasNext(); )
         {
             final File file = it.next();
@@ -398,14 +469,13 @@ public class DefaultSSHConfiguration
                 it.remove();
             }
         }
-
-        return privateKeys;
     }
 
     static String userName()
     {
         return AccessController.doPrivileged( new PrivilegedAction<String>()
         {
+            @Override
             public String run()
             {
                 return System.getProperty( "user.name" );
@@ -417,134 +487,11 @@ public class DefaultSSHConfiguration
     {
         return AccessController.doPrivileged( new PrivilegedAction<String>()
         {
+            @Override
             public String run()
             {
                 return System.getProperty( "user.home" );
             }
         } );
-    }
-
-    /**
-     * Configuration of one "Host" block in the configuration file.
-     * <p>
-     * If returned from {@link OpenSshConfig#lookup(String)} some or all of the
-     * properties may not be populated. The properties which are not populated
-     * should be defaulted by the caller.
-     * <p>
-     * When returned from {@link OpenSshConfig#lookup(String)} any wildcard
-     * entries which appear later in the configuration file will have been
-     * already merged into this block.
-     */
-    public static class Host
-    {
-        boolean patternsApplied;
-
-        String hostName;
-
-        int port;
-
-        File identityFile;
-
-        String user;
-
-        String preferredAuthentications;
-
-        Boolean batchMode;
-
-        String strictHostKeyChecking;
-
-        void copyFrom( final Host src )
-        {
-            if ( hostName == null )
-            {
-                hostName = src.hostName;
-            }
-            if ( port == 0 )
-            {
-                port = src.port;
-            }
-            if ( identityFile == null )
-            {
-                identityFile = src.identityFile;
-            }
-            if ( user == null )
-            {
-                user = src.user;
-            }
-            if ( preferredAuthentications == null )
-            {
-                preferredAuthentications = src.preferredAuthentications;
-            }
-            if ( batchMode == null )
-            {
-                batchMode = src.batchMode;
-            }
-            if ( strictHostKeyChecking == null )
-            {
-                strictHostKeyChecking = src.strictHostKeyChecking;
-            }
-        }
-
-        /**
-         * @return the value StrictHostKeyChecking property, the valid values
-         *         are "yes" (unknown hosts are not accepted), "no" (unknown
-         *         hosts are always accepted), and "ask" (user should be asked
-         *         before accepting the host)
-         */
-        public String getStrictHostKeyChecking()
-        {
-            return strictHostKeyChecking;
-        }
-
-        /**
-         * @return the real IP address or host name to connect to; never null.
-         */
-        public String getHostName()
-        {
-            return hostName;
-        }
-
-        /**
-         * @return the real port number to connect to; never 0.
-         */
-        public int getPort()
-        {
-            return port;
-        }
-
-        /**
-         * @return path of the private key file to use for authentication; null
-         *         if the caller should use default authentication strategies.
-         */
-        public File getIdentityFile()
-        {
-            return identityFile;
-        }
-
-        /**
-         * @return the real user name to connect as; never null.
-         */
-        public String getUser()
-        {
-            return user;
-        }
-
-        /**
-         * @return the preferred authentication methods, separated by commas if
-         *         more than one authentication method is preferred.
-         */
-        public String getPreferredAuthentications()
-        {
-            return preferredAuthentications;
-        }
-
-        /**
-         * @return true if batch (non-interactive) mode is preferred for this
-         *         host connection.
-         */
-        public boolean isBatchMode()
-        {
-            return batchMode != null && batchMode.booleanValue();
-        }
     }
 }

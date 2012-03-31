@@ -18,17 +18,26 @@
 
 package org.commonjava.sshwrap;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.commonjava.sshwrap.config.DefaultSSHConfiguration;
+import org.commonjava.sshwrap.config.Host;
+import org.commonjava.sshwrap.config.LocalForward;
+import org.commonjava.sshwrap.config.RemoteForward;
+import org.commonjava.sshwrap.config.SSHConfiguration;
+import org.commonjava.sshwrap.ui.Prompter;
+
 import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.UserInfo;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 
 public class SSHConnection
 {
@@ -39,48 +48,19 @@ public class SSHConnection
 
     private transient Session session;
 
-    private final String username;
+    private final Host host;
 
-    private final String host;
+    private final UserInfo userInfo;
 
-    private final int port;
-
-    private UserInfo userInfo;
-
-    public SSHConnection( final String username, final String host, final int port )
+    private SSHConnection( final Host host, final SSHConfiguration config, final UserInfo userInfo )
+        throws SSHWrapException
     {
-        this.username = username;
         this.host = host;
-        this.port = port;
-        config = new DefaultSSHConfiguration();
-        jsch = new JSch();
-    }
-
-    public SSHConnection( final String username, final String host )
-    {
-        this.username = username;
-        this.host = host;
-        port = 22;
-
-        config = new DefaultSSHConfiguration();
-        jsch = new JSch();
-    }
-
-    public SSHConnection withUserInfo( final UserInfo userInfo )
-    {
-        if ( isConnected() )
-        {
-            throw new IllegalStateException( "Cannot set user-info on connected session!" );
-        }
-
+        this.config = config;
         this.userInfo = userInfo;
-        if ( session != null )
-        {
+        jsch = new JSch();
 
-            session.setUserInfo( userInfo );
-        }
-
-        return this;
+        connect();
     }
 
     public boolean isConnected()
@@ -97,7 +77,7 @@ public class SSHConnection
         }
     }
 
-    public SSHConnection connect()
+    private void connect()
         throws SSHWrapException
     {
         try
@@ -127,21 +107,46 @@ public class SSHConnection
 
         try
         {
-            session = jsch.getSession( username, host, port );
+            session = jsch.getSession( host.getUser(), host.getHostName(), host.getPort() );
             if ( userInfo != null )
             {
                 session.setUserInfo( userInfo );
             }
 
             session.connect();
+
+            for ( final LocalForward lf : host.getLocalForwards() )
+            {
+                if ( lf.getLocalAddress() == null )
+                {
+                    session.setPortForwardingL( lf.getLocalPort(), lf.getRemoteAddress(), lf.getRemotePort() );
+                }
+                else
+                {
+                    session.setPortForwardingL( lf.getLocalAddress(), lf.getLocalPort(), lf.getRemoteAddress(),
+                                                lf.getRemotePort() );
+                }
+            }
+
+            for ( final RemoteForward rf : host.getRemoteForwards() )
+            {
+                if ( rf.getLocalAddress() == null )
+                {
+                    session.setPortForwardingR( rf.getLocalPort(), rf.getRemoteAddress(), rf.getRemotePort() );
+                }
+                else
+                {
+                    session.setPortForwardingR( rf.getLocalAddress(), rf.getLocalPort(), rf.getRemoteAddress(),
+                                                rf.getRemotePort() );
+                }
+            }
+
         }
         catch ( final JSchException e )
         {
             throw new SSHWrapException( "Failed to initialize/connect SSH session for %s@%s:%s\nReason: %s", e,
-                                        username, host, port, e.getMessage() );
+                                        host.getUser(), host.getHostName(), host.getPort(), e.getMessage() );
         }
-
-        return this;
     }
 
     public Channel openChannel( final ChannelType type )
@@ -206,7 +211,8 @@ public class SSHConnection
                 }
                 catch ( final InterruptedException ee )
                 {
-                    Thread.currentThread().interrupt();
+                    Thread.currentThread()
+                          .interrupt();
                     break;
                 }
             }
@@ -219,7 +225,7 @@ public class SSHConnection
             }
         }
 
-        return Integer.MIN_VALUE;
+        return Byte.MIN_VALUE;
     }
 
     public SSHConnection disconnect()
@@ -228,6 +234,117 @@ public class SSHConnection
         session = null;
 
         return this;
+    }
+
+    public static final class Builder
+    {
+        private SSHConfiguration config;
+
+        private String user = System.getProperty( "user.name" );
+
+        private final String host;
+
+        private int port;
+
+        private final Prompter prompter;
+
+        private final Set<LocalForward> localForwards = new HashSet<LocalForward>();
+
+        private final Set<RemoteForward> remoteForwards = new HashSet<RemoteForward>();
+
+        public Builder( final String host, final Prompter prompter )
+        {
+            this.host = host;
+            this.prompter = prompter;
+        }
+
+        public Builder withLocalForward( final LocalForward lf )
+        {
+            localForwards.add( lf );
+            return this;
+        }
+
+        public Builder withLocalForward( final String localAddress, final int localPort, final String remoteAddress,
+                                         final int remotePort )
+        {
+            localForwards.add( new LocalForward( localAddress, localPort, remoteAddress, remotePort ) );
+            return this;
+        }
+
+        public Builder withLocalForward( final int localPort, final String remoteAddress, final int remotePort )
+        {
+            localForwards.add( new LocalForward( localPort, remoteAddress, remotePort ) );
+            return this;
+        }
+
+        public Builder withRemoteForward( final RemoteForward lf )
+        {
+            remoteForwards.add( lf );
+            return this;
+        }
+
+        public Builder withRemoteForward( final String localAddress, final int localPort, final String remoteAddress,
+                                          final int remotePort )
+        {
+            remoteForwards.add( new RemoteForward( localAddress, localPort, remoteAddress, remotePort ) );
+            return this;
+        }
+
+        public Builder withRemoteForward( final int localPort, final String remoteAddress, final int remotePort )
+        {
+            remoteForwards.add( new RemoteForward( localPort, remoteAddress, remotePort ) );
+            return this;
+        }
+
+        public Builder withUser( final String user )
+        {
+            this.user = user;
+            return this;
+        }
+
+        public Builder withPort( final int port )
+        {
+            this.port = port;
+            return this;
+        }
+
+        public Builder withConfig( final SSHConfiguration config )
+        {
+            this.config = config;
+            return this;
+        }
+
+        public SSHConnection create()
+            throws SSHWrapException
+        {
+            if ( config == null )
+            {
+                config = new DefaultSSHConfiguration();
+            }
+
+            final Host h = config.lookup( host );
+            if ( user != null )
+            {
+                h.setUser( user );
+            }
+
+            if ( port > 0 )
+            {
+                h.setPort( port );
+            }
+
+            for ( final LocalForward lf : localForwards )
+            {
+                h.addLocalForward( lf );
+            }
+
+            for ( final RemoteForward rf : remoteForwards )
+            {
+                h.addRemoteForward( rf );
+            }
+
+            return new SSHConnection( h, config, prompter );
+        }
     }
 
 }

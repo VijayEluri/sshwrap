@@ -16,9 +16,8 @@
  * <http://www.gnu.org/licenses>.
  */
 
-package org.commonjava.sshwrap;
+package org.commonjava.sshwrap.config;
 
-import org.commonjava.sshwrap.DefaultSSHConfiguration.Host;
 
 import java.io.File;
 import java.io.IOException;
